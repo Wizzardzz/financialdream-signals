@@ -72,7 +72,8 @@
   </section>
 </main>
 
-<script src="logic.js"></script>
+<!-- Change this version whenever logic.js changes, so a returning browser can't pair this page with an old script. -->
+<script src="logic.js?v=2"></script>
 <script>
 (function () {
   var KEY = "financialdream.inputs.v1";
@@ -135,6 +136,11 @@
   }
   function markDone() {
     if (!current) return;
+    if (typeof Logic.applyOrder !== "function") {
+      el("doneMsg").textContent = "This page is mid-update, so nothing was recorded. Reload it and try again.";
+      el("doneMsg").hidden = false;
+      return;
+    }
     var inputs = save();
     var next = Logic.applyOrder(signal, inputs, current);
     if (!next) return;
