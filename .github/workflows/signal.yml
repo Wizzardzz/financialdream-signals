@@ -1,0 +1,46 @@
+name: signal
+on:
+  schedule:
+    - cron: "0 12 * * 6"   # Saturday 09:00 BRT: signal from Friday's close
+    - cron: "0 12 * * 1"   # Monday 09:00 BRT: refreshed prices before you trade
+  workflow_dispatch:
+    inputs:
+      test:
+        description: "none, alert (send a test email) or failure (force a failed run)"
+        default: "none"
+permissions:
+  contents: write
+env:
+  SMTP_USER: ${{ secrets.SMTP_USER }}
+  SMTP_APP_PASSWORD: ${{ secrets.SMTP_APP_PASSWORD }}
+  ALERT_TO: ${{ secrets.ALERT_TO }}
+  PAGE_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Test alert
+        if: inputs.test == 'alert'
+        run: python engine/alerts.py test
+      - name: Forced failure
+        if: inputs.test == 'failure'
+        run: exit 1
+      - name: Update signal
+        run: python engine/run.py
+      - name: Save results
+        run: |
+          git config user.name "signal-bot"
+          git config user.email "signal-bot@users.noreply.github.com"
+          git add docs/signal.json data/ptax.csv
+          git diff --cached --quiet || git commit -m "signal update"
+          git push
+      - name: Email on failure
+        if: failure()
+        run: python engine/alerts.py failure

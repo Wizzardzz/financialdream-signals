@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>FinancialDream signal</title>
+<style>
+  :root { --bg:#f6f7f8; --card:#fff; --ink:#1a1d21; --soft:#5d6670; --line:#dfe3e7; --buy:#14713d; --sell:#b3261e; --hold:#2f5d8a; --warn-bg:#fff4d6; --warn:#6b4e00; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#14171a; --card:#1e2226; --ink:#eef0f2; --soft:#a3acb5; --line:#343a40; --buy:#5fce8f; --sell:#ff8a80; --hold:#8fbdec; --warn-bg:#3a3010; --warn:#f5d77a; } }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
+  main { max-width:560px; margin:0 auto; padding:16px; }
+  h1 { font-size:18px; margin:4px 0 14px; }
+  h2 { font-size:14px; margin:0 0 10px; color:var(--soft); font-weight:600; }
+  section { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; margin-bottom:14px; }
+  #verb { font-size:28px; font-weight:700; line-height:1.2; margin:0 0 6px; }
+  #verb.buy { color:var(--buy); } #verb.sell { color:var(--sell); } #verb.hold { color:var(--hold); }
+  #detail { margin:0; }
+  dl { display:grid; grid-template-columns:1fr auto; gap:4px 12px; margin:12px 0 0; }
+  dt { color:var(--soft); } dd { margin:0; text-align:right; font-variant-numeric:tabular-nums; }
+  dd.strong { font-weight:600; }
+  label { display:grid; grid-template-columns:1fr 130px; align-items:center; gap:10px; margin-bottom:10px; }
+  input { width:100%; padding:10px; font:inherit; color:inherit; background:var(--bg); border:1px solid var(--line); border-radius:6px; text-align:right; font-variant-numeric:tabular-nums; }
+  .note { font-size:14px; color:var(--soft); margin:10px 0 0; }
+  .warn { background:var(--warn-bg); color:var(--warn); border-radius:8px; padding:10px 12px; margin-bottom:14px; font-size:15px; }
+  ul { margin:0; padding-left:18px; } li { font-variant-numeric:tabular-nums; }
+  [hidden] { display:none !important; }
+</style>
+</head>
+<body>
+<main>
+  <h1>FinancialDream signal</h1>
+  <div id="stale" class="warn" hidden></div>
+  <div id="fallback" class="warn" hidden>The official exchange rate was unavailable for this update, so a backup rate was used. Check again after the next update before acting on a change.</div>
+
+  <section aria-live="polite">
+    <p id="verb">Loading…</p>
+    <p id="detail"></p>
+    <dl id="order"></dl>
+    <p id="orderNote" class="note"></p>
+  </section>
+
+  <section>
+    <h2>Your money</h2>
+    <label>Cash available (R$) <input id="cash" type="number" inputmode="decimal" min="0" step="0.01"></label>
+    <label>NASD11 shares held <input id="NASD11" type="number" inputmode="numeric" min="0" step="1"></label>
+    <label>CHIP11 shares held <input id="CHIP11" type="number" inputmode="numeric" min="0" step="1"></label>
+    <label>Fee per order (R$) <input id="fee" type="number" inputmode="decimal" min="0" step="0.01"></label>
+    <p class="note">Saved only in this browser and never sent anywhere, so your phone and PC each keep their own copy. Update your shares and cash after every order.</p>
+  </section>
+
+  <section>
+    <h2>Why</h2>
+    <dl id="why"></dl>
+    <p class="note" id="rule">Holds whichever of QQQ or SMH had the higher 2-year return in BRL, reviewed each quarter. In when more than 4% above its 200-day average, out when more than 4% below.</p>
+  </section>
+
+  <section>
+    <h2>Changes in the last 3 years</h2>
+    <ul id="changes"></ul>
+  </section>
+
+  <section>
+    <h2>Before you act</h2>
+    <p class="note" style="margin-top:0">Prices here are last closes, so check the live quote first. Use a limit order, and leave the rest of your cash in CDI. This is a rule tested on past data, not a promise: it depends heavily on semiconductors, and falls of 25–35% are expected along the way. Taxes are not included: 15% on gains is assumed, paid by DARF, so confirm this with an accountant.</p>
+  </section>
+</main>
+
+<script src="logic.js"></script>
+<script>
+(function () {
+  var KEY = "financialdream.inputs.v1";
+  var DEFAULTS = { cash: "", NASD11: "", CHIP11: "", fee: "4.50" };
+  var FIELDS = ["cash", "NASD11", "CHIP11", "fee"];
+  var signal = null;
+
+  function el(id) { return document.getElementById(id); }
+  function brl(x) { return "R$" + Number(x).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+  function pct(x) { return (x * 100).toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + "%"; }
+
+  function load() {
+    var saved = {};
+    try { saved = JSON.parse(localStorage.getItem(KEY)) || {}; } catch (e) {}
+    FIELDS.forEach(function (f) { el(f).value = saved[f] !== undefined ? saved[f] : DEFAULTS[f]; });
+  }
+  function save() {
+    var v = {};
+    FIELDS.forEach(function (f) { v[f] = el(f).value; });
+    try { localStorage.setItem(KEY, JSON.stringify(v)); } catch (e) {}
+    return v;
+  }
+  function rows(id, pairs) {
+    var dl = el(id);
+    dl.textContent = "";
+    pairs.forEach(function (p) {
+      var dt = document.createElement("dt"), dd = document.createElement("dd");
+      dt.textContent = p[0]; dd.textContent = p[1];
+      if (p[2]) dd.className = "strong";
+      dl.appendChild(dt); dl.appendChild(dd);
+    });
+  }
+  function show(cls, verb, detail, pairs, note) {
+    el("verb").className = cls;
+    el("verb").textContent = verb;
+    el("detail").textContent = detail || "";
+    rows("order", pairs || []);
+    el("orderNote").textContent = note || "";
+  }
+  function orderRows(o) {
+    return [
+      ["Limit price (up to)", brl(o.limit), true],
+      ["Last close", brl(o.lastClose)],
+      ["Cost at the limit", brl(o.cost)],
+      ["Fee", brl(o.fee) + (o.cost > 0 ? " (" + pct(o.feeShare) + ")" : "")],
+      ["Total", brl(o.total), true],
+      ["Cash left for CDI", brl(o.left)],
+    ];
+  }
+
+  function render() {
+    var inputs = save();
+    if (!signal) return;
+    if (Logic.ageDays(signal.signal_date, new Date()) > 10) {
+      show("sell", "DON'T ACT YET", "This signal is out of date, so no order is shown. Wait for it to update.");
+      return;
+    }
+    var d = Logic.decide(signal, inputs);
+    if (d.action === "SELL") {
+      show("sell", "SELL all " + d.shares + " " + d.fund,
+        d.thenBuy ? "The rule now holds " + d.thenBuy + ". Sell first; update your shares and cash afterwards, and the buy instruction appears here."
+                  : "The trend turned off. Sell, then keep the money in CDI.",
+        [["Fee", brl(d.fee)]], "A sale may owe 15% tax on the gain. Keep the brokerage note for your DARF.");
+    } else if (d.action === "OUT") {
+      show("hold", "STAY OUT", "The trend is off. Keep your money in CDI, with no order needed.");
+    } else if (d.action === "BUY") {
+      show("buy", "BUY " + d.shares + " " + d.fund, "Day limit order.", orderRows(d),
+        d.feeShare > 0.01 ? "The fee is " + pct(d.feeShare) + " of this purchase, which is high. It falls below 1% at about " + brl(d.fee * 100) + "." : "");
+    } else if (d.action === "ADD") {
+      show("buy", "ADD " + d.shares + " " + d.fund, "You have enough extra cash to add to your position with a fee of 1% or less.", orderRows(d));
+    } else if (d.action === "HOLD") {
+      show("hold", "HOLD " + d.held + " " + d.fund, "No order needed.", [],
+        d.waitUntil ? "Keep new money in CDI until your cash reaches about " + brl(d.waitUntil) + ", so one order adds it all for a fee of 1% or less." : "");
+    } else if (d.action === "CANT_AFFORD") {
+      show("hold", "NOT ENOUGH CASH", "The rule holds " + d.fund + ". One share with the fee needs about " + brl(d.needed) + ". Enter your cash above.");
+    } else {
+      show("hold", "NO PRICE", "No recent price for " + d.fund + ". Don't act on this page until the next update.");
+    }
+  }
+
+  function renderSignal() {
+    var age = Logic.ageDays(signal.signal_date, new Date());
+    if (age > 10) {
+      el("stale").hidden = false;
+      el("stale").textContent = "This signal is " + age + " days old, so the update may have failed. Don't act on it until it updates.";
+    }
+    el("fallback").hidden = signal.fx_source !== "fallback";
+    rows("why", [
+      ["Signal date", signal.signal_date],
+      ["Holding rule", signal.target ? signal.target + " (" + signal.leader + ")" : "Cash (CDI)"],
+      [signal.leader + " level in BRL", signal.level.toLocaleString("pt-BR")],
+      ["200-day average", signal.average.toLocaleString("pt-BR")],
+      ["In above / out below", signal.enter_above.toLocaleString("pt-BR") + " / " + signal.exit_below.toLocaleString("pt-BR")],
+    ]);
+    var ul = el("changes");
+    ul.textContent = "";
+    if (!signal.changes.length) {
+      var none = document.createElement("li");
+      none.textContent = "None";
+      ul.appendChild(none);
+    }
+    signal.changes.slice().reverse().forEach(function (c) {
+      var li = document.createElement("li");
+      li.textContent = c.date + ": " + (c.target ? "hold " + c.target : "out, in cash");
+      ul.appendChild(li);
+    });
+  }
+
+  load();
+  FIELDS.forEach(function (f) { el(f).addEventListener("input", render); });
+  // A test file can be named in the address, but only one sitting beside this page.
+  var asked = new URLSearchParams(location.search).get("signal");
+  var src = asked && /^[\w-]+\.json$/.test(asked) ? asked : "signal.json";
+  fetch(src + "?t=" + Date.now(), { cache: "no-store" })
+    .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+    .then(function (s) { signal = s; renderSignal(); render(); })
+    .catch(function () { show("sell", "NO SIGNAL", "The signal couldn't be loaded. Don't act on this page until it can."); });
+})();
+</script>
+</body>
+</html>
