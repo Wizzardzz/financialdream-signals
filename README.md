@@ -16,7 +16,7 @@ A free page that says what to buy or sell under model v3 "LEADER", and how many 
 5. Under Settings → Secrets and variables → Actions, add:
    - `SMTP_USER`: your Gmail address
    - `SMTP_APP_PASSWORD`: the app password
-   - `ALERT_TO`: where alerts go (optional, defaults to `SMTP_USER`)
+   - `ALERT_TO`: where alerts go, with several addresses separated by commas (optional, defaults to `SMTP_USER`). Each person gets their own email. Keep the addresses in this secret, not in the code, because the repo is public
 6. Under Actions → signal → Run workflow, run it with `test` set to:
    - `alert`: you should get a test email
    - `failure`: you should get a failure email

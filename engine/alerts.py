@@ -7,17 +7,25 @@ from email.message import EmailMessage
 
 def send(subject, body):
     user, password = os.environ.get("SMTP_USER"), os.environ.get("SMTP_APP_PASSWORD")
-    to = os.environ.get("ALERT_TO") or user
     if not user or not password:
         print(f"Email not configured, would send: {subject}")
         return False
-    msg = EmailMessage()
-    msg["Subject"], msg["From"], msg["To"] = subject, user, to
-    msg.set_content(body)
+    recipients = [a.strip() for a in (os.environ.get("ALERT_TO") or user).replace(";", ",").split(",") if a.strip()]
+    sent = 0
     with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=30) as s:
         s.login(user, password)
-        s.send_message(msg)
-    print(f"Email sent: {subject}")
+        for i, to in enumerate(recipients, 1):  # one email each, so nobody sees the other addresses
+            msg = EmailMessage()
+            msg["Subject"], msg["From"], msg["To"] = subject, user, to
+            msg.set_content(body)
+            try:
+                s.send_message(msg)
+                sent += 1
+            except smtplib.SMTPException as e:  # one bad address must not stop the others
+                print(f"Recipient {i} of {len(recipients)} failed: {type(e).__name__}")
+    print(f"Email sent to {sent} of {len(recipients)} recipients: {subject}")
+    if sent < len(recipients):
+        raise RuntimeError("Not every alert recipient received the email.")
     return True
 
 
