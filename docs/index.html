@@ -13,11 +13,13 @@
   main { max-width:560px; margin:0 auto; padding:16px; }
   h1 { font-size:18px; margin:4px 0 14px; }
   h2 { font-size:14px; margin:0 0 10px; color:var(--soft); font-weight:600; }
+  h3 { font-size:14px; margin:14px 0 8px; font-weight:600; }
   section { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; margin-bottom:14px; }
   #verb { font-size:28px; font-weight:700; line-height:1.2; margin:0 0 6px; }
   #verb.buy { color:var(--buy); } #verb.sell { color:var(--sell); } #verb.hold { color:var(--hold); }
   #detail { margin:0; }
   dl { display:grid; grid-template-columns:1fr auto; gap:4px 12px; margin:12px 0 0; }
+  dl:empty { display:none; }
   dt { color:var(--soft); } dd { margin:0; text-align:right; font-variant-numeric:tabular-nums; }
   dd.strong { font-weight:600; }
   label { display:grid; grid-template-columns:1fr 130px; align-items:center; gap:10px; margin-bottom:10px; }
@@ -35,6 +37,7 @@
   <h1>FinancialDream signal</h1>
   <div id="stale" class="warn" hidden></div>
   <div id="fallback" class="warn" hidden>The official exchange rate was unavailable for this update, so a backup rate was used. Check again after the next update before acting on a change.</div>
+  <div id="over" class="warn" hidden></div>
 
   <section aria-live="polite">
     <p id="verb">Loading…</p>
@@ -46,19 +49,30 @@
     <button id="undo" type="button" class="secondary" hidden>Undo</button>
   </section>
 
+  <section id="optionsBox">
+    <h2>Where your money should go</h2>
+    <dl id="options"></dl>
+  </section>
+
   <section>
     <h2>Your money</h2>
-    <label>Cash not yet invested (R$) <input id="cash" type="number" inputmode="decimal" min="0" step="0.01"></label>
-    <label>NASD11 shares held <input id="NASD11" type="number" inputmode="numeric" min="0" step="1"></label>
-    <label>CHIP11 shares held <input id="CHIP11" type="number" inputmode="numeric" min="0" step="1"></label>
+    <label>Money allocated (R$) <input id="allocated" type="number" inputmode="decimal" min="0" step="0.01"></label>
+    <h3>CHIP11</h3>
+    <label>Shares <input id="CHIP11_shares" type="number" inputmode="numeric" min="0" step="1"></label>
+    <label>Average price (R$) <input id="CHIP11_avg" type="number" inputmode="decimal" min="0" step="0.01"></label>
+    <h3>NASD11</h3>
+    <label>Shares <input id="NASD11_shares" type="number" inputmode="numeric" min="0" step="1"></label>
+    <label>Average price (R$) <input id="NASD11_avg" type="number" inputmode="decimal" min="0" step="0.01"></label>
+    <h3>Costs</h3>
     <label>Fee per order (R$) <input id="fee" type="number" inputmode="decimal" min="0" step="0.01"></label>
-    <p class="note">Saved only in this browser and never sent anywhere, so your phone and PC each keep their own copy. Don't count money already in shares as cash. When you deposit more, add it to the cash figure.</p>
+    <dl id="summary"></dl>
+    <p class="note">Saved only in this browser and never sent anywhere, so your phone and PC each keep their own copy. Raise the money allocated when you deposit more, and lower it when you withdraw. The button above updates shares and average price for you, and you can edit any of them by hand.</p>
   </section>
 
   <section>
     <h2>Why</h2>
     <dl id="why"></dl>
-    <p class="note" id="rule">Holds whichever of QQQ or SMH had the higher 2-year return in BRL, reviewed each quarter. In when more than 4% above its 200-day average, out when more than 4% below.</p>
+    <p class="note" id="rule">Holds whichever of QQQ or SMH had the higher 2-year return in BRL, reviewed each quarter. In when more than 4% above its 200-day average, out when more than 4% below. Your average price doesn't change this: it only shows what you spent and your gain.</p>
   </section>
 
   <section>
@@ -68,36 +82,67 @@
 
   <section>
     <h2>Before you act</h2>
-    <p class="note" style="margin-top:0">Prices here are last closes, so check the live quote first. Use a limit order, and leave the rest of your cash in CDI. This is a rule tested on past data, not a promise: it depends heavily on semiconductors, and falls of 25–35% are expected along the way. Taxes are not included: 15% on gains is assumed, paid by DARF, so confirm this with an accountant.</p>
+    <p class="note" style="margin-top:0">Prices here are last closes, so check the live quote first. Use a limit order, and leave the rest of your money in CDI. This is a rule tested on past data, not a promise: it depends heavily on semiconductors, and falls of 25–35% are expected along the way. The tax shown is an estimate: 15% on gains is assumed, paid by DARF, so confirm this with an accountant.</p>
   </section>
 </main>
 
 <!-- Change this version whenever logic.js changes, so a returning browser can't pair this page with an old script. -->
-<script src="logic.js?v=2"></script>
+<script src="logic.js?v=4"></script>
 <script>
 (function () {
-  var KEY = "financialdream.inputs.v1";
-  var DEFAULTS = { cash: "", NASD11: "", CHIP11: "", fee: "4.50" };
-  var FIELDS = ["cash", "NASD11", "CHIP11", "fee"];
+  var KEY = "financialdream.portfolio.v2";
+  var OLD_KEY = "financialdream.inputs.v1";
+  var FIELDS = ["allocated", "CHIP11_shares", "CHIP11_avg", "NASD11_shares", "NASD11_avg", "fee"];
   var signal = null;
   var current = null; // the instruction on screen
-  var before = null;  // inputs before the last "done", for undo
+  var before = null;  // fields before the last "done", for undo
 
   function el(id) { return document.getElementById(id); }
   function brl(x) { return "R$" + Number(x).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
   function pct(x) { return (x * 100).toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + "%"; }
+  function signedBrl(x) { return (x >= 0 ? "+" : "−") + brl(Math.abs(x)); }
+  function signedPct(x) { return (x >= 0 ? "+" : "−") + pct(Math.abs(x)); }
 
   function load() {
-    var saved = {};
-    try { saved = JSON.parse(localStorage.getItem(KEY)) || {}; } catch (e) {}
-    FIELDS.forEach(function (f) { el(f).value = saved[f] !== undefined ? saved[f] : DEFAULTS[f]; });
+    var saved = null;
+    try { saved = JSON.parse(localStorage.getItem(KEY)); } catch (e) {}
+    if (!saved) {
+      // Carry over shares and fee from the earlier version of this page.
+      var old = {};
+      try { old = JSON.parse(localStorage.getItem(OLD_KEY)) || {}; } catch (e) {}
+      saved = { CHIP11_shares: old.CHIP11 || "", NASD11_shares: old.NASD11 || "", fee: old.fee };
+    }
+    FIELDS.forEach(function (f) {
+      el(f).value = saved[f] !== undefined && saved[f] !== null ? saved[f] : (f === "fee" ? "4.50" : "");
+    });
   }
-  function save() {
+  function fields() {
     var v = {};
     FIELDS.forEach(function (f) { v[f] = el(f).value; });
+    return v;
+  }
+  function save() {
+    var v = fields();
     try { localStorage.setItem(KEY, JSON.stringify(v)); } catch (e) {}
     return v;
   }
+  function toState(v) {
+    return {
+      allocated: v.allocated, fee: v.fee,
+      CHIP11: { shares: v.CHIP11_shares, avg: v.CHIP11_avg },
+      NASD11: { shares: v.NASD11_shares, avg: v.NASD11_avg },
+    };
+  }
+  function fromState(s) {
+    var blank = function (x) { return x ? x : ""; };
+    return {
+      allocated: blank(s.allocated), fee: s.fee,
+      CHIP11_shares: blank(s.CHIP11.shares), CHIP11_avg: blank(s.CHIP11.avg),
+      NASD11_shares: blank(s.NASD11.shares), NASD11_avg: blank(s.NASD11.avg),
+    };
+  }
+  function setFields(v) { FIELDS.forEach(function (f) { el(f).value = v[f]; }); }
+
   function rows(id, pairs) {
     var dl = el(id);
     dl.textContent = "";
@@ -122,7 +167,7 @@
       ["Cost at the limit", brl(o.cost)],
       ["Fee", brl(o.fee) + (o.cost > 0 ? " (" + pct(o.feeShare) + ")" : "")],
       ["Total", brl(o.total), true],
-      ["Cash left for CDI", brl(o.left)],
+      ["Left for CDI", brl(o.left)],
     ];
   }
 
@@ -131,9 +176,6 @@
     el("doneMsg").hidden = true;
     el("undo").hidden = true;
   }
-  function setInputs(v) {
-    FIELDS.forEach(function (f) { el(f).value = v[f] === 0 || v[f] ? v[f] : ""; });
-  }
   function markDone() {
     if (!current) return;
     if (typeof Logic.applyOrder !== "function") {
@@ -141,52 +183,96 @@
       el("doneMsg").hidden = false;
       return;
     }
-    var inputs = save();
-    var next = Logic.applyOrder(signal, inputs, current);
+    var d = current;
+    var v = save();
+    var next = Logic.applyOrder(signal, toState(v), d);
     if (!next) return;
-    before = inputs;
-    var msg = current.action === "SELL"
-      ? "Recorded: 0 " + current.fund + ", cash about " + brl(next.cash) + " at the last close. Correct the cash below to what you actually received."
-      : "Recorded: " + next[current.fund] + " " + current.fund + ", cash " + brl(next.cash) + " if filled at the limit. Correct the cash below to your real figure.";
-    setInputs(next);
+    before = v;
+    setFields(fromState(next));
     render();
+    var msg = d.action === "SELL"
+      ? "Recorded the sale at the last close. Correct the money allocated below if you received a different amount."
+      : "Recorded: " + next[d.fund].shares + " " + d.fund + " at an average of " + brl(next[d.fund].avg) + ", assuming a fill at the limit and including the fee. Correct the average below to your real figure.";
     el("doneMsg").textContent = msg;
     el("doneMsg").hidden = false;
     el("undo").hidden = false;
   }
 
+  function renderSummary(p) {
+    var r = [
+      ["Money allocated", brl(p.allocated)],
+      ["Spent", brl(p.spent)],
+      ["Not yet invested", brl(p.cash), true],
+    ];
+    Logic.FUNDS.forEach(function (f) {
+      var x = p.funds[f];
+      if (x.shares > 0) {
+        r.push([f + " now worth", brl(x.value) + (x.gain === null ? "" : " (" + signedBrl(x.gain) + ", " + signedPct(x.gainPct) + ")")]);
+      }
+    });
+    rows("summary", r);
+    var over = el("over");
+    over.hidden = !p.over;
+    if (p.over) over.textContent = "You've spent " + brl(p.over) + " more than you allocated. Raise the money allocated if you added funds, or check your shares and average prices.";
+  }
+
   function render() {
-    var inputs = save();
+    var v = save();
     current = null;
     el("done").hidden = true;
     if (!signal) return;
+    var state = toState(v);
+    var p = Logic.portfolio(signal, state);
+    renderSummary(p);
+    el("optionsBox").hidden = true;
+
     if (Logic.ageDays(signal.signal_date, new Date()) > 10) {
       show("sell", "DON'T ACT YET", "This signal is out of date, so no order is shown. Wait for it to update.");
       return;
     }
-    var d = Logic.decide(signal, inputs);
+    var d = Logic.recommend(signal, state);
     if (d.action === "BUY" || d.action === "ADD" || d.action === "SELL") {
       current = d;
       el("done").hidden = false;
       el("done").textContent = d.action === "SELL" ? "I sold them" : "I bought them";
     }
+    if (d.action !== "NEED_AVG" && d.action !== "NEED_ALLOCATED" && d.action !== "NO_PRICE") {
+      var o = Logic.options(signal, state, d);
+      var cdiLabel = d.action === "SELL" ? "CDI (after the sale)" : "CDI";
+      rows("options", [
+        ["CHIP11", o.CHIP11, signal.target === "CHIP11"],
+        ["NASD11", o.NASD11, signal.target === "NASD11"],
+        [cdiLabel, brl(o.CDI), !signal.target],
+      ]);
+      el("optionsBox").hidden = false;
+    }
+
     if (d.action === "SELL") {
+      var sale = [["Last close", brl(d.lastClose)], ["Estimated proceeds, after the fee", brl(d.proceeds), true]];
+      if (typeof d.gain === "number") {
+        sale.push(["Gain or loss", signedBrl(d.gain)]);
+        sale.push(["Estimated tax (15%)", brl(d.tax)]);
+      }
       show("sell", "SELL all " + d.shares + " " + d.fund,
         d.thenBuy ? "The rule now holds " + d.thenBuy + ". Sell first, and the buy instruction appears here once you confirm below."
                   : "The trend turned off. Sell, then keep the money in CDI.",
-        [["Fee", brl(d.fee)]], "A sale may owe 15% tax on the gain. Keep the brokerage note for your DARF.");
+        sale, "Keep the brokerage note for your DARF. Set the tax money aside: it isn't deducted from these figures.");
     } else if (d.action === "OUT") {
       show("hold", "STAY OUT", "The trend is off. Keep your money in CDI, with no order needed.");
     } else if (d.action === "BUY") {
-      show("buy", "BUY " + d.shares + " " + d.fund, "Day limit order, using the " + brl(inputs.cash) + " you entered as cash.", orderRows(d),
+      show("buy", "BUY " + d.shares + " " + d.fund, "Day limit order, using the " + brl(d.cash) + " of your allocated money not yet invested.", orderRows(d),
         d.feeShare > 0.01 ? "The fee is " + pct(d.feeShare) + " of this purchase, which is high. It falls below 1% at about " + brl(d.fee * 100) + "." : "");
     } else if (d.action === "ADD") {
-      show("buy", "ADD " + d.shares + " " + d.fund, "You entered " + brl(inputs.cash) + " of cash not yet invested, enough to add to your position with a fee of 1% or less. If that money is already in shares, lower the cash figure below.", orderRows(d));
+      show("buy", "ADD " + d.shares + " " + d.fund, "You have " + brl(d.cash) + " of allocated money not yet invested, enough to add with a fee of 1% or less.", orderRows(d));
     } else if (d.action === "HOLD") {
-      show("hold", "HOLD " + d.held + " " + d.fund, "No order needed.", [],
-        d.waitUntil ? "Keep new money in CDI until your cash reaches about " + brl(d.waitUntil) + ", so one order adds it all for a fee of 1% or less." : "");
+      show("hold", "HOLD " + d.held + " " + d.fund, d.cash > 0 ? "No order needed. Keep the " + brl(d.cash) + " not yet invested in CDI." : "No order needed.", [],
+        d.waitUntil ? "Keep it in CDI until it reaches about " + brl(d.waitUntil) + ", so one order adds it all for a fee of 1% or less." : "");
     } else if (d.action === "CANT_AFFORD") {
-      show("hold", "NOT ENOUGH CASH", "The rule holds " + d.fund + ". One share with the fee needs about " + brl(d.needed) + ". Enter your cash above.");
+      show("hold", "NOT ENOUGH CASH", "The rule holds " + d.fund + ", but one share with the fee needs about " + brl(d.needed) + " and you have " + brl(d.cash) + " not yet invested. Keep it in CDI.");
+    } else if (d.action === "NEED_AVG") {
+      show("hold", "ENTER AVERAGE PRICE", "Enter the average price of your " + d.fund + " shares below, so the page can work out what you've spent.");
+    } else if (d.action === "NEED_ALLOCATED") {
+      show("hold", "ENTER YOUR MONEY", "Enter the money allocated below to get a recommendation.");
     } else {
       show("hold", "NO PRICE", "No recent price for " + d.fund + ". Don't act on this page until the next update.");
     }
@@ -224,7 +310,7 @@
   FIELDS.forEach(function (f) { el(f).addEventListener("input", function () { clearDone(); render(); }); });
   el("done").addEventListener("click", markDone);
   el("undo").addEventListener("click", function () {
-    if (before) setInputs(before);
+    if (before) setFields(before);
     clearDone();
     render();
   });

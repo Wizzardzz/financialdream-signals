@@ -1,4 +1,4 @@
-// Turns the signal and your inputs into one instruction. Pure function: no network, no storage.
+// Turns the signal and your portfolio into one instruction. Pure functions: no network, no storage.
 (function (root, factory) {
   if (typeof module === "object" && module.exports) module.exports = factory();
   else root.Logic = factory();
@@ -6,6 +6,7 @@
   var FUNDS = ["NASD11", "CHIP11"];
   var SLIP = 0.005; // suggested limit: 0.5% over the last close
   var MAX_FEE_SHARE = 0.01; // add money only if the fee is 1% of the purchase or less
+  var TAX = 0.15; // assumed tax on gains
 
   function num(x) {
     var n = Number(x);
@@ -14,7 +15,11 @@
   function round2(x) {
     return Math.round(x * 100) / 100;
   }
+  function closeOf(signal, f) {
+    return signal.prices && signal.prices[f] ? num(signal.prices[f].close) : 0;
+  }
 
+  // Works out the order from cash and share counts.
   function decide(signal, inputs) {
     var cash = num(inputs.cash);
     var fee = num(inputs.fee);
@@ -27,9 +32,9 @@
         return { action: "SELL", fund: f, shares: held[f], fee: fee, thenBuy: target || null };
       }
     }
-    if (!target) return { action: "OUT", fee: fee };
+    if (!target) return { action: "OUT", fee: fee, cash: cash };
 
-    var price = signal.prices && signal.prices[target] ? num(signal.prices[target].close) : 0;
+    var price = closeOf(signal, target);
     if (!price) return { action: "NO_PRICE", fund: target };
 
     var limit = round2(price * (1 + SLIP));
@@ -38,7 +43,7 @@
     var cost = round2(shares * limit);
     var order = {
       fund: target, shares: shares, limit: limit, lastClose: price, fee: fee, cost: cost,
-      total: round2(cost + fee), left: round2(cash - cost - fee),
+      total: round2(cost + fee), left: round2(cash - cost - fee), cash: cash,
       feeShare: cost > 0 ? fee / cost : 0,
     };
 
@@ -63,17 +68,88 @@
     };
   }
 
-  // Inputs after the instruction was carried out. Buys assume a fill at the limit, the most it can cost;
-  // sales assume the last close. Either way the person can correct the cash to the real figure.
-  function applyOrder(signal, inputs, d) {
-    var next = { cash: num(inputs.cash), NASD11: Math.floor(num(inputs.NASD11)), CHIP11: Math.floor(num(inputs.CHIP11)), fee: inputs.fee };
+  // Spent is shares x average price. Whatever is left of the allocated money is uninvested cash.
+  function portfolio(signal, state) {
+    var allocated = num(state.allocated);
+    var spent = 0, value = 0, missingAvg = null, funds = {};
+    FUNDS.forEach(function (f) {
+      var s = state[f] || {};
+      var shares = Math.floor(num(s.shares));
+      var avg = num(s.avg);
+      var cost = round2(shares * avg);
+      var close = closeOf(signal, f);
+      var val = round2(shares * close);
+      if (shares > 0 && !avg && !missingAvg) missingAvg = f;
+      funds[f] = {
+        shares: shares, avg: avg, cost: cost, close: close, value: val,
+        gain: shares > 0 && avg ? round2(val - cost) : null,
+        gainPct: shares > 0 && avg && cost > 0 ? val / cost - 1 : null,
+      };
+      spent += cost;
+      value += val;
+    });
+    spent = round2(spent);
+    return {
+      allocated: allocated, spent: spent, cash: Math.max(0, round2(allocated - spent)),
+      over: spent > allocated ? round2(spent - allocated) : 0,
+      value: round2(value), funds: funds, missingAvg: missingAvg, fee: num(state.fee),
+    };
+  }
+
+  // The instruction for this portfolio. A sell is never held back by missing details.
+  function recommend(signal, state) {
+    var p = portfolio(signal, state);
+    var d = decide(signal, { cash: p.cash, NASD11: p.funds.NASD11.shares, CHIP11: p.funds.CHIP11.shares, fee: p.fee });
+    if (d.action === "SELL") {
+      var fund = p.funds[d.fund];
+      var proceeds = round2(d.shares * fund.close - d.fee);
+      d.lastClose = fund.close;
+      d.proceeds = proceeds;
+      if (fund.avg) {
+        d.gain = round2(proceeds - fund.cost);
+        d.tax = d.gain > 0 ? round2(d.gain * TAX) : 0;
+      }
+      return d;
+    }
+    if (d.action === "OUT") return d;
+    if (p.missingAvg) return { action: "NEED_AVG", fund: p.missingAvg };
+    if (!p.allocated) return { action: "NEED_ALLOCATED" };
+    return d;
+  }
+
+  // What to do with each of the three options: the fund the rule holds, the other fund, and CDI.
+  function options(signal, state, d) {
+    var p = portfolio(signal, state);
+    var out = {};
+    FUNDS.forEach(function (f) {
+      var isTarget = f === signal.target;
+      var shares = p.funds[f].shares;
+      if (d.action === "SELL" && d.fund === f) out[f] = "Sell all " + d.shares;
+      else if (isTarget && (d.action === "BUY" || d.action === "ADD")) out[f] = "Buy " + d.shares;
+      else if (isTarget && d.action === "SELL") out[f] = "Buy after the sale";
+      else if (isTarget) out[f] = shares > 0 ? "Hold " + shares : "Buy when you have the cash";
+      else out[f] = shares > 0 ? "Hold " + shares + " for now" : "Don't buy";
+    });
+    if (d.action === "BUY" || d.action === "ADD") out.CDI = d.left;
+    else if (d.action === "SELL") out.CDI = round2(p.cash + d.proceeds);
+    else out.CDI = p.cash;
+    return out;
+  }
+
+  // Portfolio after the instruction was carried out. Buys assume a fill at the limit and add the fee to the
+  // average price, so spent includes costs. A sale at the last close moves its gain or loss into the allocated
+  // money, so the whole proceeds become uninvested cash. The person can correct any figure afterwards.
+  function applyOrder(signal, state, d) {
+    var p = portfolio(signal, state);
+    var next = { allocated: p.allocated, fee: state.fee };
+    FUNDS.forEach(function (f) { next[f] = { shares: p.funds[f].shares, avg: p.funds[f].avg }; });
     if (d.action === "BUY" || d.action === "ADD") {
-      next[d.fund] += d.shares;
-      next.cash = Math.max(0, round2(next.cash - d.total));
+      var n = next[d.fund].shares + d.shares;
+      next[d.fund] = { shares: n, avg: Math.round(((p.funds[d.fund].cost + d.total) / n) * 10000) / 10000 };
     } else if (d.action === "SELL") {
-      var p = signal.prices && signal.prices[d.fund] ? num(signal.prices[d.fund].close) : 0;
-      next[d.fund] = 0;
-      next.cash = Math.max(0, round2(next.cash + d.shares * p - d.fee));
+      if (typeof d.gain === "number") next.allocated = Math.max(0, round2(p.allocated + d.gain));
+      else next.allocated = round2(p.allocated + d.proceeds);
+      next[d.fund] = { shares: 0, avg: 0 };
     } else {
       return null;
     }
@@ -84,5 +160,5 @@
     return Math.floor((now - new Date(signalDate + "T00:00:00Z")) / 86400000);
   }
 
-  return { decide: decide, applyOrder: applyOrder, ageDays: ageDays, FUNDS: FUNDS };
+  return { decide: decide, portfolio: portfolio, recommend: recommend, options: options, applyOrder: applyOrder, ageDays: ageDays, FUNDS: FUNDS };
 });
