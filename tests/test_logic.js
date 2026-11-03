@@ -1,6 +1,6 @@
 // Run with: node tests/test_logic.js
 const assert = require("assert");
-const { decide, ageDays } = require("../docs/logic.js");
+const { decide, applyOrder, ageDays } = require("../docs/logic.js");
 
 const P = { NASD11: { close: 21.5 }, CHIP11: { close: 35 } };
 const on = { target: "CHIP11", prices: P };
@@ -58,4 +58,38 @@ t("bad inputs count as zero", () => {
 });
 t("part shares are ignored", () => assert.equal(decide(off, i(0, 0, 2.9)).shares, 2));
 t("signal age", () => assert.equal(ageDays("2026-10-30", new Date("2026-11-10T12:00:00Z")), 11));
+const after = (s, inp) => { const d = decide(s, inp); return { d, next: applyOrder(s, inp, d) }; };
+t("buying then confirming leads to HOLD, not another buy", () => {
+  const { d, next } = after(on, i(500, 0, 0));
+  assert.equal(next.CHIP11, 14); assert.equal(next.cash, 3.12);
+  assert.equal(decide(on, next).action, "HOLD");
+  assert.equal(d.action, "BUY");
+});
+t("the reported case: 13 held with R$500 still entered asks to add, and confirming clears it", () => {
+  const { d, next } = after(on, i(500, 0, 13));
+  assert.equal(d.action, "ADD");
+  assert.equal(next.CHIP11, 27); assert.equal(decide(on, next).action, "HOLD");
+  assert.equal(decide(on, i(35.04, 0, 13)).action, "HOLD");
+});
+t("confirming a sale clears the shares and adds the money", () => {
+  const { next } = after(off, i(3, 0, 14));
+  assert.equal(next.CHIP11, 0); assert.equal(next.cash, 3 + 14 * 35 - 4.5);
+  assert.equal(decide(off, next).action, "OUT");
+});
+t("a leader switch goes sell, confirm, buy, confirm, hold", () => {
+  const a = after(on, i(0, 20, 0));
+  assert.equal(a.d.action, "SELL");
+  const b = after(on, a.next);
+  assert.equal(b.d.action, "BUY"); assert.equal(b.d.fund, "CHIP11");
+  assert.equal(decide(on, b.next).action, "HOLD");
+});
+t("nothing to confirm when no order is shown", () => {
+  assert.equal(applyOrder(on, i(0, 0, 14), decide(on, i(0, 0, 14))), null);
+  assert.equal(applyOrder(off, i(500, 0, 0), decide(off, i(500, 0, 0))), null);
+});
+t("cash never goes negative", () => {
+  const inp = i(40, 0, 0);
+  const d = Object.assign(decide(on, inp), { total: 50 });
+  assert.equal(applyOrder(on, inp, d).cash, 0);
+});
 console.log(`${n} passed`);

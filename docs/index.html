@@ -25,6 +25,8 @@
   .note { font-size:14px; color:var(--soft); margin:10px 0 0; }
   .warn { background:var(--warn-bg); color:var(--warn); border-radius:8px; padding:10px 12px; margin-bottom:14px; font-size:15px; }
   ul { margin:0; padding-left:18px; } li { font-variant-numeric:tabular-nums; }
+  button { width:100%; margin-top:14px; padding:12px; font:inherit; font-weight:600; color:var(--card); background:var(--ink); border:0; border-radius:6px; cursor:pointer; }
+  button.secondary { color:var(--ink); background:transparent; border:1px solid var(--line); margin-top:10px; }
   [hidden] { display:none !important; }
 </style>
 </head>
@@ -39,15 +41,18 @@
     <p id="detail"></p>
     <dl id="order"></dl>
     <p id="orderNote" class="note"></p>
+    <button id="done" type="button" hidden></button>
+    <p id="doneMsg" class="note" hidden></p>
+    <button id="undo" type="button" class="secondary" hidden>Undo</button>
   </section>
 
   <section>
     <h2>Your money</h2>
-    <label>Cash available (R$) <input id="cash" type="number" inputmode="decimal" min="0" step="0.01"></label>
+    <label>Cash not yet invested (R$) <input id="cash" type="number" inputmode="decimal" min="0" step="0.01"></label>
     <label>NASD11 shares held <input id="NASD11" type="number" inputmode="numeric" min="0" step="1"></label>
     <label>CHIP11 shares held <input id="CHIP11" type="number" inputmode="numeric" min="0" step="1"></label>
     <label>Fee per order (R$) <input id="fee" type="number" inputmode="decimal" min="0" step="0.01"></label>
-    <p class="note">Saved only in this browser and never sent anywhere, so your phone and PC each keep their own copy. Update your shares and cash after every order.</p>
+    <p class="note">Saved only in this browser and never sent anywhere, so your phone and PC each keep their own copy. Don't count money already in shares as cash. When you deposit more, add it to the cash figure.</p>
   </section>
 
   <section>
@@ -74,6 +79,8 @@
   var DEFAULTS = { cash: "", NASD11: "", CHIP11: "", fee: "4.50" };
   var FIELDS = ["cash", "NASD11", "CHIP11", "fee"];
   var signal = null;
+  var current = null; // the instruction on screen
+  var before = null;  // inputs before the last "done", for undo
 
   function el(id) { return document.getElementById(id); }
   function brl(x) { return "R$" + Number(x).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
@@ -118,26 +125,57 @@
     ];
   }
 
+  function clearDone() {
+    before = null;
+    el("doneMsg").hidden = true;
+    el("undo").hidden = true;
+  }
+  function setInputs(v) {
+    FIELDS.forEach(function (f) { el(f).value = v[f] === 0 || v[f] ? v[f] : ""; });
+  }
+  function markDone() {
+    if (!current) return;
+    var inputs = save();
+    var next = Logic.applyOrder(signal, inputs, current);
+    if (!next) return;
+    before = inputs;
+    var msg = current.action === "SELL"
+      ? "Recorded: 0 " + current.fund + ", cash about " + brl(next.cash) + " at the last close. Correct the cash below to what you actually received."
+      : "Recorded: " + next[current.fund] + " " + current.fund + ", cash " + brl(next.cash) + " if filled at the limit. Correct the cash below to your real figure.";
+    setInputs(next);
+    render();
+    el("doneMsg").textContent = msg;
+    el("doneMsg").hidden = false;
+    el("undo").hidden = false;
+  }
+
   function render() {
     var inputs = save();
+    current = null;
+    el("done").hidden = true;
     if (!signal) return;
     if (Logic.ageDays(signal.signal_date, new Date()) > 10) {
       show("sell", "DON'T ACT YET", "This signal is out of date, so no order is shown. Wait for it to update.");
       return;
     }
     var d = Logic.decide(signal, inputs);
+    if (d.action === "BUY" || d.action === "ADD" || d.action === "SELL") {
+      current = d;
+      el("done").hidden = false;
+      el("done").textContent = d.action === "SELL" ? "I sold them" : "I bought them";
+    }
     if (d.action === "SELL") {
       show("sell", "SELL all " + d.shares + " " + d.fund,
-        d.thenBuy ? "The rule now holds " + d.thenBuy + ". Sell first; update your shares and cash afterwards, and the buy instruction appears here."
+        d.thenBuy ? "The rule now holds " + d.thenBuy + ". Sell first, and the buy instruction appears here once you confirm below."
                   : "The trend turned off. Sell, then keep the money in CDI.",
         [["Fee", brl(d.fee)]], "A sale may owe 15% tax on the gain. Keep the brokerage note for your DARF.");
     } else if (d.action === "OUT") {
       show("hold", "STAY OUT", "The trend is off. Keep your money in CDI, with no order needed.");
     } else if (d.action === "BUY") {
-      show("buy", "BUY " + d.shares + " " + d.fund, "Day limit order.", orderRows(d),
+      show("buy", "BUY " + d.shares + " " + d.fund, "Day limit order, using the " + brl(inputs.cash) + " you entered as cash.", orderRows(d),
         d.feeShare > 0.01 ? "The fee is " + pct(d.feeShare) + " of this purchase, which is high. It falls below 1% at about " + brl(d.fee * 100) + "." : "");
     } else if (d.action === "ADD") {
-      show("buy", "ADD " + d.shares + " " + d.fund, "You have enough extra cash to add to your position with a fee of 1% or less.", orderRows(d));
+      show("buy", "ADD " + d.shares + " " + d.fund, "You entered " + brl(inputs.cash) + " of cash not yet invested, enough to add to your position with a fee of 1% or less. If that money is already in shares, lower the cash figure below.", orderRows(d));
     } else if (d.action === "HOLD") {
       show("hold", "HOLD " + d.held + " " + d.fund, "No order needed.", [],
         d.waitUntil ? "Keep new money in CDI until your cash reaches about " + brl(d.waitUntil) + ", so one order adds it all for a fee of 1% or less." : "");
@@ -177,7 +215,13 @@
   }
 
   load();
-  FIELDS.forEach(function (f) { el(f).addEventListener("input", render); });
+  FIELDS.forEach(function (f) { el(f).addEventListener("input", function () { clearDone(); render(); }); });
+  el("done").addEventListener("click", markDone);
+  el("undo").addEventListener("click", function () {
+    if (before) setInputs(before);
+    clearDone();
+    render();
+  });
   // A test file can be named in the address, but only one sitting beside this page.
   var asked = new URLSearchParams(location.search).get("signal");
   var src = asked && /^[\w-]+\.json$/.test(asked) ? asked : "signal.json";

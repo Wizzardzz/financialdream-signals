@@ -63,9 +63,26 @@
     };
   }
 
+  // Inputs after the instruction was carried out. Buys assume a fill at the limit, the most it can cost;
+  // sales assume the last close. Either way the person can correct the cash to the real figure.
+  function applyOrder(signal, inputs, d) {
+    var next = { cash: num(inputs.cash), NASD11: Math.floor(num(inputs.NASD11)), CHIP11: Math.floor(num(inputs.CHIP11)), fee: inputs.fee };
+    if (d.action === "BUY" || d.action === "ADD") {
+      next[d.fund] += d.shares;
+      next.cash = Math.max(0, round2(next.cash - d.total));
+    } else if (d.action === "SELL") {
+      var p = signal.prices && signal.prices[d.fund] ? num(signal.prices[d.fund].close) : 0;
+      next[d.fund] = 0;
+      next.cash = Math.max(0, round2(next.cash + d.shares * p - d.fee));
+    } else {
+      return null;
+    }
+    return next;
+  }
+
   function ageDays(signalDate, now) {
     return Math.floor((now - new Date(signalDate + "T00:00:00Z")) / 86400000);
   }
 
-  return { decide: decide, ageDays: ageDays, FUNDS: FUNDS };
+  return { decide: decide, applyOrder: applyOrder, ageDays: ageDays, FUNDS: FUNDS };
 });
