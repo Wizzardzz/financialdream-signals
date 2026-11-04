@@ -33,7 +33,7 @@ if __name__ == "__main__":
     page = os.environ.get("PAGE_URL", "")
     if sys.argv[1:] == ["failure"]:
         ok = send("FinancialDream: signal update FAILED",
-                  "The weekly signal did not update, so the page may be out of date.\n"
+                  "The signal did not update, so the page may be out of date.\n"
                   "Check the failed run in the GitHub Actions tab of the repo.\n\n" + page)
     elif sys.argv[1:] == ["test"]:
         ok = send("FinancialDream: test alert", "Email alerts are working.\n\n" + page)

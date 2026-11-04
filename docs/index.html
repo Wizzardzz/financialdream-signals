@@ -25,6 +25,7 @@
   label { display:grid; grid-template-columns:1fr 130px; align-items:center; gap:10px; margin-bottom:10px; }
   input { width:100%; padding:10px; font:inherit; color:inherit; background:var(--bg); border:1px solid var(--line); border-radius:6px; text-align:right; font-variant-numeric:tabular-nums; }
   .note { font-size:14px; color:var(--soft); margin:10px 0 0; }
+  #updated { margin:-8px 0 14px; }
   .warn { background:var(--warn-bg); color:var(--warn); border-radius:8px; padding:10px 12px; margin-bottom:14px; font-size:15px; }
   ul { margin:0; padding-left:18px; } li { font-variant-numeric:tabular-nums; }
   button { width:100%; margin-top:14px; padding:12px; font:inherit; font-weight:600; color:var(--card); background:var(--ink); border:0; border-radius:6px; cursor:pointer; }
@@ -35,6 +36,7 @@
 <body>
 <main>
   <h1>FinancialDream signal</h1>
+  <p id="updated" class="note" hidden></p>
   <div id="stale" class="warn" hidden></div>
   <div id="fallback" class="warn" hidden>The official exchange rate was unavailable for this update, so a backup rate was used. Check again after the next update before acting on a change.</div>
   <div id="over" class="warn" hidden></div>
@@ -279,6 +281,11 @@
   }
 
   function renderSignal() {
+    var updated = new Date(signal.generated_at);
+    if (!isNaN(updated)) {
+      el("updated").textContent = "Last updated " + updated.toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" }) + " (your local time)";
+      el("updated").hidden = false;
+    }
     var age = Logic.ageDays(signal.signal_date, new Date());
     if (age > 10) {
       el("stale").hidden = false;

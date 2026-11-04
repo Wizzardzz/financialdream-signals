@@ -4,7 +4,7 @@ A free page that says what to buy or sell under model v3 "LEADER", and how many 
 
 **Not investment advice.** This is one person's rule, tested on past data. It depends heavily on semiconductors, and falls of 25–35% are expected along the way.
 
-- `engine/`: calculates the signal, runs on GitHub Actions on Saturday and Monday mornings
+- `engine/`: calculates the signal, runs on GitHub Actions every morning from Monday to Saturday. The buy or sell signal still comes from the last Friday close, and the daily runs refresh the fund prices
 - `docs/`: the page, served by GitHub Pages. Amounts you enter stay in your browser
 - `data/ptax.csv`: official USD/BRL history, so a central bank outage can't change past signals
 
@@ -28,4 +28,4 @@ node tests/test_logic.js
 python tests/check_against_backtest.py   # needs the FinancialDream research folder
 ```
 
-GitHub turns off scheduled runs after 60 days without repo activity. The Monday price refresh commits a change most weeks, which keeps it active. The page warns and hides the order if the signal is more than 10 days old.
+GitHub turns off scheduled runs after 60 days without repo activity. Each run commits a change, which keeps it active. The page warns and hides the order if the signal is more than 10 days old.

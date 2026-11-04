@@ -1,8 +1,7 @@
 name: signal
 on:
   schedule:
-    - cron: "0 12 * * 6"   # Saturday 09:00 BRT: signal from Friday's close
-    - cron: "0 12 * * 1"   # Monday 09:00 BRT: refreshed prices before you trade
+    - cron: "0 12 * * 1-6"   # Monday to Saturday 09:00 BRT: prices from the previous close, signal from the last Friday close
   workflow_dispatch:
     inputs:
       test:
