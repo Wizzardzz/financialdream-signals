@@ -19,6 +19,20 @@ SIGNAL_FILE = os.path.join(ROOT, "docs", "signal.json")
 MAX_SIGNAL_AGE_DAYS = 10
 
 
+def download_close(tickers, tries=4, **kwargs):
+    """Close prices for every ticker, or an error. yfinance reports a failed ticker (for example its
+    cache saying 'database is locked' when threads collide) only by leaving that column empty, so check."""
+    for attempt in range(tries):
+        px = yf.download(tickers, progress=False, threads=False, **kwargs)["Close"]
+        missing = [t for t in tickers if t not in px.columns or px[t].dropna().empty]
+        if not missing:
+            return px
+        print(f"No prices for {missing} (attempt {attempt + 1} of {tries})")
+        if attempt < tries - 1:
+            time.sleep(10 * (attempt + 1))
+    raise RuntimeError(f"Could not download prices for {missing}.")
+
+
 def fetch_ptax(start, end, tries=4):
     url = ("https://api.bcb.gov.br/dados/serie/bcdata.sgs.1/dados?formato=json"
            f"&dataInicial={start:%d/%m/%Y}&dataFinal={end:%d/%m/%Y}")
@@ -45,7 +59,7 @@ def load_fx(today):
     except (requests.RequestException, ValueError, KeyError) as e:
         print(f"PTAX unavailable ({e}); using Yahoo BRL=X for recent days")
         y = yf.download("BRL=X", start=str((stored.index[-1] + pd.Timedelta(days=1)).date()),
-                        auto_adjust=True, progress=False)["Close"].squeeze()
+                        auto_adjust=True, progress=False, threads=False)["Close"].squeeze()
         if isinstance(y, pd.Series) and len(y):
             y.index = pd.to_datetime(y.index).tz_localize(None)
         elif (today - stored.index[-1]).days > MAX_SIGNAL_AGE_DAYS:
@@ -59,7 +73,7 @@ def load_fx(today):
 
 
 def build(today):
-    px = yf.download(["QQQ", "SMH"], period="6y", auto_adjust=True, progress=False)["Close"]
+    px = download_close(["QQQ", "SMH"], period="6y", auto_adjust=True)
     px.index = pd.to_datetime(px.index).tz_localize(None)
     fx, source = load_fx(today)
     usd = fx.reindex(px.index.union(fx.index)).ffill().reindex(px.index)
@@ -69,12 +83,10 @@ def build(today):
     if age > MAX_SIGNAL_AGE_DAYS:
         raise RuntimeError(f"Signal data is stale: last close used is {sig['signal_date']}.")
 
-    funds = yf.download(["NASD11.SA", "CHIP11.SA"], period="1mo", auto_adjust=False, progress=False)["Close"]
+    funds = download_close(["NASD11.SA", "CHIP11.SA"], period="1mo", auto_adjust=False)
     prices = {}
     for t in funds.columns:
         s = funds[t].dropna()
-        if s.empty:
-            raise RuntimeError(f"No price for {t}.")
         prices[t.replace(".SA", "")] = dict(close=round(float(s.iloc[-1]), 2), date=str(s.index[-1].date()))
     sig.update(prices=prices, fx_source=source,
                generated_at=dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"))
