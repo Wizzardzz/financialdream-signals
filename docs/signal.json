@@ -24,14 +24,14 @@
   ],
   "prices": {
     "CHIP11": {
-      "close": 34.84,
-      "date": "2026-11-12"
+      "close": 33.77,
+      "date": "2026-11-13"
     },
     "NASD11": {
-      "close": 22.23,
-      "date": "2026-11-12"
+      "close": 21.97,
+      "date": "2026-11-13"
     }
   },
-  "fx_source": "fallback",
-  "generated_at": "2026-11-12T19:42:35+00:00"
+  "fx_source": "ptax",
+  "generated_at": "2026-11-13T19:23:06+00:00"
 }
