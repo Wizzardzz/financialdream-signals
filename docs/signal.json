@@ -1,13 +1,13 @@
 {
-  "signal_date": "2026-11-06",
+  "signal_date": "2026-11-13",
   "leader": "SMH",
   "leader_fund": "CHIP11",
-  "invested": false,
-  "target": null,
-  "level": 2552.38,
-  "average": 2676.0,
-  "enter_above": 2783.04,
-  "exit_below": 2568.96,
+  "invested": true,
+  "target": "CHIP11",
+  "level": 2751.01,
+  "average": 2691.47,
+  "enter_above": 2799.12,
+  "exit_below": 2583.81,
   "changes": [
     {
       "date": "2025-02-28",
@@ -20,18 +20,22 @@
     {
       "date": "2026-11-06",
       "target": null
+    },
+    {
+      "date": "2026-11-13",
+      "target": "CHIP11"
     }
   ],
   "prices": {
     "CHIP11": {
-      "close": 33.77,
+      "close": 33.75,
       "date": "2026-11-13"
     },
     "NASD11": {
-      "close": 21.97,
+      "close": 22.06,
       "date": "2026-11-13"
     }
   },
   "fx_source": "ptax",
-  "generated_at": "2026-11-13T19:23:06+00:00"
+  "generated_at": "2026-11-14T17:47:07+00:00"
 }
