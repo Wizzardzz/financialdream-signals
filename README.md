@@ -4,7 +4,7 @@ A free page that says what to buy or sell under model v3 "LEADER", and how many 
 
 **Not investment advice.** This is one person's rule, tested on past data. It depends heavily on semiconductors, and falls of 25–35% are expected along the way.
 
-- `engine/`: calculates the signal, runs on GitHub Actions every morning from Monday to Saturday. The buy or sell signal still comes from the last Friday close, and the daily runs refresh the fund prices
+- `engine/`: calculates the signal, runs on GitHub Actions every hour from 09:30 to 16:30 BRT, Monday to Saturday. The buy or sell signal still comes from the last Friday close, and the hourly runs refresh the fund prices
 - `docs/`: the page, served by GitHub Pages. Amounts you enter stay in your browser
 - `data/ptax.csv`: official USD/BRL history, so a central bank outage can't change past signals
 
